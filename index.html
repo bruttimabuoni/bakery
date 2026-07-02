@@ -357,6 +357,7 @@
     <div class="panel">
       <h3>Riepilogo dati</h3>
       <div id="dataStats"></div>
+      <button class="btn full sm ghost" style="margin-top:10px" onclick="fetchSalesFromSheet(false)">Carica vendite da Sheets</button>
     </div>
     <div class="panel">
       <h3>Backup ed esportazione</h3>
@@ -583,7 +584,7 @@ function reparti(){
   src.forEach(function(p){if(s.indexOf(p.rep)<0)s.push(p.rep)});
   return s;
 }
-function onSearch(v){searchQ=v.trim().toLowerCase();el('repChips').style.display=(searchQ||todayFilter)?'none':'flex';renderProducts()}
+function onSearch(v){searchQ=v.trim().toLowerCase();el('repChips').style.display=searchQ?'none':'flex';renderProducts()}
 function toggleDayFilter(){todayFilter=!todayFilter;renderDayToggle();activeRep='Tutti';renderRepChips();renderProducts()}
 function renderDayToggle(){
   var btn=el('dayToggleBtn');if(!btn)return;
@@ -591,7 +592,7 @@ function renderDayToggle(){
   el('dayToggleLbl').textContent=todayFilter?'Solo oggi':'Tutti i giorni';
   var dow=todayDow();
   el('todayDayName').textContent=DAY_NAMES_FULL[dow];
-  el('repChips').style.display=(searchQ||todayFilter)?'none':'flex';
+  el('repChips').style.display=searchQ?'none':'flex';
 }
 
 function renderRepChips(){
@@ -624,7 +625,7 @@ function renderProducts(){
   } else {
     var reps = activeRep==='Tutti' ? reparti() : [activeRep];
     reps.forEach(function(rep){
-      var inRep=pool.filter(function(p){return p.rep===rep});
+      var inRep=pool.filter(function(p){return p.rep===rep}).sort(function(a,b){return a.name.localeCompare(b.name,'it')});
       if(!inRep.length)return;
       html+='<div class="reparto-title">'+esc(rep)+'</div><div class="grid">'+inRep.map(cardHtml).join('')+'</div>';
     });
@@ -1083,9 +1084,8 @@ var APPS_SCRIPT_CODE=
 "\n"+
 "function doGet(e) {\n"+
 "  var action = e && e.parameter && e.parameter.action;\n"+
-"  if (action === 'products') {\n"+
-"    return jsonResponse(getProducts());\n"+
-"  }\n"+
+"  if (action === 'products') return jsonResponse(getProducts());\n"+
+"  if (action === 'sales')    return jsonResponse(getSales());\n"+
 "  return jsonResponse({ok:true, info:'Forno Vendite script attivo'});\n"+
 "}\n"+
 "\n"+
@@ -1157,6 +1157,24 @@ var APPS_SCRIPT_CODE=
 "  if (newRows.length) sh.getRange(sh.getLastRow()+1, 1, newRows.length, 9).setValues(newRows);\n"+
 "}\n"+
 "\n"+
+"// ----- leggi vendite -----\n"+
+"function getSales() {\n"+
+"  var ss = SpreadsheetApp.getActiveSpreadsheet();\n"+
+"  var sh = ss.getSheetByName(SALES_SHEET);\n"+
+"  if (!sh || sh.getLastRow() < 2) return {ok:true, sales:[]};\n"+
+"  var rows = sh.getRange(2, 1, sh.getLastRow()-1, 9).getValues();\n"+
+"  // Raggruppa per scontrino (colonna C = indice 2)\n"+
+"  var map = {};\n"+
+"  rows.forEach(function(r) {\n"+
+"    var id = r[2]; if (!id) return;\n"+
+"    if (!map[id]) map[id] = {id:id, ts:new Date(r[0]).toISOString(), synced:true, items:[], total:0};\n"+
+"    var tot = parseFloat(r[8])||0;\n"+
+"    map[id].items.push({rep:r[3], name:r[4], unit:r[5], qty:parseFloat(r[6])||0, price:parseFloat(r[7])||0, total:tot});\n"+
+"    map[id].total += tot;\n"+
+"  });\n"+
+"  return {ok:true, sales:Object.keys(map).map(function(k){return map[k];})};\n"+
+"}\n"+
+"\n"+
 "function jsonResponse(obj) {\n"+
 "  return ContentService\n"+
 "    .createTextOutput(JSON.stringify(obj))\n"+
@@ -1196,17 +1214,61 @@ function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{'&':'&amp;
 
 function renderAll(){renderDayToggle();renderRepChips();renderProducts();renderProdList();syncCart()}
 
+/* ============================== WAKE LOCK ============================== */
+var _wakeLock=null;
+function acquireWakeLock(){
+  if(!('wakeLock' in navigator))return;
+  navigator.wakeLock.request('screen').then(function(wl){
+    _wakeLock=wl;
+    wl.addEventListener('release',function(){_wakeLock=null});
+  }).catch(function(){});
+}
+document.addEventListener('visibilitychange',function(){
+  if(document.visibilityState==='visible')acquireWakeLock();
+});
+acquireWakeLock();
+
+/* ============================== FETCH VENDITE DA SHEETS ============================== */
+var salesSyncing=false;
+function fetchSalesFromSheet(silent){
+  if(!cfg.sheetUrl){if(!silent)toast('Nessun foglio collegato');return}
+  if(salesSyncing)return;
+  salesSyncing=true;
+  if(!silent)toast('Caricamento vendite in corso…');
+  fetch(cfg.sheetUrl+'?action=sales',{cache:'no-store'})
+    .then(function(r){if(!r.ok)throw new Error('http '+r.status);return r.json();})
+    .then(function(j){
+      salesSyncing=false;
+      if(!j||!j.ok||!Array.isArray(j.sales))throw new Error('risposta non valida');
+      // Unisci: mantieni quelle locali non ancora sul foglio, aggiungi quelle remote
+      var remoteIds={};
+      j.sales.forEach(function(s){remoteIds[s.id]=true});
+      var localOnly=sales.filter(function(s){return !remoteIds[s.id]});
+      sales=j.sales.concat(localOnly);
+      // Segna tutte come sincronizzate (vengono dal foglio)
+      sales.forEach(function(s){s.synced=true});
+      save();renderAll();
+      if(!silent)toast('Vendite aggiornate dal foglio ✓ ('+j.sales.length+')');
+      updateSyncUI();
+    })
+    .catch(function(){
+      salesSyncing=false;
+      if(!silent)toast('Impossibile caricare le vendite dal foglio');
+    });
+}
+
 /* ============================== INIT ============================== */
 setToday();renderAll();
-// all'avvio: carica prodotti da Sheets e sincronizza vendite in attesa
+// all'avvio: carica prodotti + vendite da Sheets e sincronizza
 if(cfg.sheetUrl){
   fetchProductsFromSheet();
+  fetchSalesFromSheet(true);
   if(cfg.auto)syncPending(true);
 }
 // ogni 60s sincronizza vendite in attesa; ogni 5 min ricarica catalogo
 setInterval(function(){if(cfg.sheetUrl&&cfg.auto&&pending().length)syncPending(true)},60000);
 setInterval(function(){if(cfg.sheetUrl)fetchProductsFromSheet()},5*60*1000);
-window.addEventListener('online',function(){if(cfg.sheetUrl){fetchProductsFromSheet();if(cfg.auto)syncPending(true);}});
+window.addEventListener('online',function(){if(cfg.sheetUrl){fetchProductsFromSheet();fetchSalesFromSheet(true);if(cfg.auto)syncPending(true);}});
 </script>
 </body>
 </html>
