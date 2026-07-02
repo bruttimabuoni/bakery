@@ -192,11 +192,11 @@
   .panel h3 span{float:right;font-family:var(--mono);font-weight:600;color:var(--ink-soft);font-size:13px}
 
   /* trend bars */
-  .trend{display:flex;align-items:flex-end;gap:5px;height:128px;padding-top:6px}
-  .tb{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;min-width:0}
+  .trend{display:flex;align-items:stretch;gap:5px;height:140px;padding-top:6px}
+  .tb{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:4px;min-width:0}
   .tb .bar{width:100%;max-width:30px;background:var(--accent);border-radius:5px 5px 0 0;min-height:3px;transition:height .3s}
   .tb .bar.empty{background:var(--line)}
-  .tb .tlbl{font-size:9.5px;color:var(--ink-faint);font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+  .tb .tlbl{flex-shrink:0;font-size:9.5px;color:var(--ink-faint);font-family:var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
 
   /* horizontal bars (reparti / prodotti) */
   .hbar{margin:11px 0}
@@ -762,9 +762,10 @@ function renderTrend(arr,r){
   }
   el('trendUnit').textContent=unitLbl;
   var max=Math.max.apply(null,buckets.concat([1]));
+  var BAR_H=100; // px disponibili per le barre (il resto è label)
   el('trend').innerHTML=buckets.map(function(v,i){
-    var h=Math.round(v/max*100);
-    return '<div class="tb" title="'+money(v)+'"><div class="bar'+(v<=0?' empty':'')+'" style="height:'+(v<=0?2:Math.max(h,4))+'%"></div><div class="tlbl">'+(labels[i]||'')+'</div></div>';
+    var h=v<=0?2:Math.max(Math.round(v/max*BAR_H),4);
+    return '<div class="tb" title="'+money(v)+'"><div class="bar'+(v<=0?' empty':'')+'" style="height:'+h+'px"></div><div class="tlbl">'+(labels[i]||'')+'</div></div>';
   }).join('');
 }
 
