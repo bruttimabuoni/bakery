@@ -367,11 +367,6 @@
       <button class="btn full sm ghost" onclick="document.getElementById('importFile').click()">Ripristina da backup</button>
       <input type="file" id="importFile" accept="application/json" style="display:none" onchange="importJSON(event)">
     </div>
-    <div class="panel">
-      <h3>Azzera</h3>
-      <p class="help">Cancella in modo definitivo tutte le vendite registrate (i prodotti restano). Fai prima un backup.</p>
-      <button class="btn full sm danger" onclick="confirmClearSales()">Cancella tutte le vendite</button>
-    </div>
   </section>
 
   <!-- cart bar -->
@@ -810,8 +805,9 @@ function toggleReceipt(id){var d=el(id);if(d)d.style.display=d.style.display==='
 function renderTopProd(arr){
   var map={};
   arr.forEach(function(s){s.items.forEach(function(i){
-    if(!map[i.productId])map[i.productId]={name:i.name,unit:i.unit,rev:0,q:0};
-    map[i.productId].rev+=i.total;map[i.productId].q+=i.qty;
+    var key=i.productId||i.name;
+    if(!map[key])map[key]={name:i.name,unit:i.unit,rev:0,q:0};
+    map[key].rev+=i.total;map[key].q+=i.qty;
   })});
   var rows=Object.keys(map).map(function(k){return map[k]}).sort(function(a,b){return b.rev-a.rev}).slice(0,8);
   if(!rows.length){el('topProd').innerHTML='<div class="empty" style="padding:14px">Nessuna vendita nel periodo.</div>';return}
@@ -1163,11 +1159,22 @@ var APPS_SCRIPT_CODE=
 "  var sh = ss.getSheetByName(SALES_SHEET);\n"+
 "  if (!sh || sh.getLastRow() < 2) return {ok:true, sales:[]};\n"+
 "  var rows = sh.getRange(2, 1, sh.getLastRow()-1, 9).getValues();\n"+
-"  // Raggruppa per scontrino (colonna C = indice 2)\n"+
 "  var map = {};\n"+
 "  rows.forEach(function(r) {\n"+
-"    var id = r[2]; if (!id) return;\n"+
-"    if (!map[id]) map[id] = {id:id, ts:new Date(r[0]).toISOString(), synced:true, items:[], total:0};\n"+
+"    var id = String(r[2]); if (!id) return;\n"+
+"    if (!map[id]) {\n"+
+"      // Ricava il timestamp dall'ID (formato 'x<base36timestamp>...')\n"+
+"      var ts;\n"+
+"      try { ts = new Date(parseInt(id.slice(1), 36)).toISOString(); } catch(e) { ts = new Date().toISOString(); }\n"+
+"      // Combina data (col A, oggetto Date in Sheets) e ora (col B, stringa 'HH:MM')\n"+
+"      if (r[0] instanceof Date && r[1]) {\n"+
+"        var parts = String(r[1]).split(':');\n"+
+"        var d = new Date(r[0]);\n"+
+"        d.setHours(parseInt(parts[0])||0, parseInt(parts[1])||0, 0, 0);\n"+
+"        ts = d.toISOString();\n"+
+"      }\n"+
+"      map[id] = {id:id, ts:ts, synced:true, items:[], total:0};\n"+
+"    }\n"+
 "    var tot = parseFloat(r[8])||0;\n"+
 "    map[id].items.push({rep:r[3], name:r[4], unit:r[5], qty:parseFloat(r[6])||0, price:parseFloat(r[7])||0, total:tot});\n"+
 "    map[id].total += tot;\n"+
