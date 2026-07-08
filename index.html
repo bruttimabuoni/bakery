@@ -1040,6 +1040,8 @@ function fetchProductsFromSheet(){
       if(!j||!j.ok||!Array.isArray(j.products))throw new Error('risposta non valida');
       var imported=j.products.map(function(p){
         var days=Array.isArray(p.days)?p.days.map(Number).filter(function(n){return n>=0&&n<=6}):[];
+        // Se il foglio non ha i giorni ma li abbiamo in locale, li preserviamo
+        if(!days.length){var local=products.find(function(x){return x.id===p.id});if(local&&local.days&&local.days.length)days=local.days.slice();}
         return {id:p.id||uid(),name:p.name,rep:p.rep||'Vari',unit:(p.unit==='kg'?'kg':'pz'),price:parseFloat(p.price)||0,days:days};
       }).filter(function(p){return p.name});
       if(!imported.length){updateProdSyncUI('nessun prodotto nel foglio',true);return}
@@ -1164,16 +1166,20 @@ var APPS_SCRIPT_CODE=
 "  rows.forEach(function(r) {\n"+
 "    var id = String(r[2]); if (!id) return;\n"+
 "    if (!map[id]) {\n"+
-"      // Ricava il timestamp dall'ID (formato 'x<base36timestamp>...')\n"+
-"      var ts;\n"+
-"      try { ts = new Date(parseInt(id.slice(1), 36)).toISOString(); } catch(e) { ts = new Date().toISOString(); }\n"+
-"      // Combina data (col A, oggetto Date in Sheets) e ora (col B, stringa 'HH:MM')\n"+
-"      if (r[0] instanceof Date && r[1]) {\n"+
-"        var parts = String(r[1]).split(':');\n"+
-"        var d = new Date(r[0]);\n"+
-"        d.setHours(parseInt(parts[0])||0, parseInt(parts[1])||0, 0, 0);\n"+
-"        ts = d.toISOString();\n"+
+"      // Ricostruisce il timestamp da data (col A) e ora (col B)\n"+
+"      var tsDate;\n"+
+"      if (r[0] instanceof Date) {\n"+
+"        tsDate = new Date(r[0]);\n"+
+"      } else {\n"+
+"        // Formato italiano 'dd/mm/yyyy'\n"+
+"        var dp = String(r[0]).split('/');\n"+
+"        tsDate = new Date(parseInt(dp[2]), parseInt(dp[1])-1, parseInt(dp[0]));\n"+
 "      }\n"+
+"      if (r[1] && !isNaN(tsDate.getTime())) {\n"+
+"        var tp = String(r[1]).split(':');\n"+
+"        tsDate.setHours(parseInt(tp[0])||0, parseInt(tp[1])||0, 0, 0);\n"+
+"      }\n"+
+"      var ts = (!isNaN(tsDate.getTime())) ? tsDate.toISOString() : new Date().toISOString();\n"+
 "      map[id] = {id:id, ts:ts, synced:true, items:[], total:0};\n"+
 "    }\n"+
 "    var tot = parseFloat(r[8])||0;\n"+
