@@ -1180,7 +1180,9 @@ var APPS_SCRIPT_CODE=
 "        tsDate.setHours(parseInt(tp[0])||0, parseInt(tp[1])||0, 0, 0);\n"+
 "      }\n"+
 "      var ts = (!isNaN(tsDate.getTime())) ? tsDate.toISOString() : new Date().toISOString();\n"+
-"      map[id] = {id:id, ts:ts, synced:true, items:[], total:0};\n"+
+"      var dataStr = r[0] instanceof Date ? Utilities.formatDate(r[0],'Europe/Rome','dd/MM/yyyy') : String(r[0]);\n"+
+"      var oraStr  = String(r[1]);\n"+
+"      map[id] = {id:id, ts:ts, data:dataStr, ora:oraStr, synced:true, items:[], total:0};\n"+
 "    }\n"+
 "    var tot = parseFloat(r[8])||0;\n"+
 "    map[id].items.push({rep:r[3], name:r[4], unit:r[5], qty:parseFloat(r[6])||0, price:parseFloat(r[7])||0, total:tot});\n"+
@@ -1254,12 +1256,19 @@ function fetchSalesFromSheet(silent){
     .then(function(j){
       salesSyncing=false;
       if(!j||!j.ok||!Array.isArray(j.sales))throw new Error('risposta non valida');
-      // Unisci: mantieni quelle locali non ancora sul foglio, aggiungi quelle remote
       var remoteIds={};
       j.sales.forEach(function(s){remoteIds[s.id]=true});
       var localOnly=sales.filter(function(s){return !remoteIds[s.id]});
+      // Ricostruisce timestamp da data+ora restituiti dal foglio
+      j.sales.forEach(function(s){
+        if(s.data&&s.ora){
+          var dp=s.data.split('/'); // dd/mm/yyyy
+          var tp=s.ora.split(':');
+          var d=new Date(parseInt(dp[2]),parseInt(dp[1])-1,parseInt(dp[0]),parseInt(tp[0])||0,parseInt(tp[1])||0,0,0);
+          if(!isNaN(d.getTime()))s.ts=d.toISOString();
+        }
+      });
       sales=j.sales.concat(localOnly);
-      // Segna tutte come sincronizzate (vengono dal foglio)
       sales.forEach(function(s){s.synced=true});
       save();renderAll();
       if(!silent)toast('Vendite aggiornate dal foglio ✓ ('+j.sales.length+')');
